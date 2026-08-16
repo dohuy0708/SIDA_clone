@@ -15,7 +15,7 @@ from .segment_anything import build_sam_vit_h
 from torchviz import make_dot
 import itertools
 
-import deepspeed
+# import deepspeed  # Not available on Colab free tier
 
 def dice_loss(
     inputs: torch.Tensor,
@@ -414,17 +414,29 @@ class SIDAForCausalLM(LlavaLlamaForCausalLM):
         tokenizer=None,
     ):
         with torch.no_grad():
-            # Generate initial output sequence
-            outputs = self.generate(
+            # Generate text output (output_ids only)
+            output_ids = self.generate(
                 images=images_clip,
                 input_ids=input_ids,
                 max_new_tokens=max_new_tokens,
                 num_beams=1,
-                output_hidden_states=True,
-                return_dict_in_generate=True,
             )
-            output_hidden_states = outputs.hidden_states[-1]  # Shape: [batch_size, sequence_length, hidden_size]
-            output_ids = outputs.sequences  # Generated sequences
+
+            # Get hidden_states via forward() — compatible with all transformers versions
+            # (generate()'s hidden_states format changed between transformers versions)
+            _fwd = super(SIDAForCausalLM, self).forward(
+                images=images_clip,
+                input_ids=output_ids,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            _hs = _fwd.hidden_states
+            if isinstance(_hs, (tuple, list)):
+                output_hidden_states = _hs[-1]
+            else:
+                output_hidden_states = _hs
+            if output_hidden_states.dim() == 2:
+                output_hidden_states = output_hidden_states.unsqueeze(0)
 
             # Assume batch_size=1 for simplicity (as seen in chat.py)
             batch_size = output_ids.shape[0]
@@ -439,6 +451,14 @@ class SIDAForCausalLM(LlavaLlamaForCausalLM):
                 ],
                 dim=1
             )
+
+            # Align mask and hidden_states dimensions (may differ by 1 due to BOS token)
+            hs_len = output_hidden_states.shape[1]
+            mask_len = cls_token_mask.shape[1]
+            if mask_len < hs_len:
+                output_hidden_states = output_hidden_states[:, :mask_len, :]
+            elif mask_len > hs_len:
+                cls_token_mask = cls_token_mask[:, :hs_len]
 
             pred_masks = []
             predicted_class = None
@@ -459,6 +479,12 @@ class SIDAForCausalLM(LlavaLlamaForCausalLM):
                             ],
                             dim=1
                         )
+                        # Align seg_token_mask with hidden_states dimensions
+                        seg_mask_len = seg_token_mask.shape[1]
+                        if seg_mask_len < hs_len:
+                            seg_token_mask = seg_token_mask[:, :hs_len]
+                        elif seg_mask_len > hs_len:
+                            seg_token_mask = seg_token_mask[:, :hs_len]
                         # Process hidden states for segmentation
                         hidden_states = []
                         hidden_states.append(self.model.text_hidden_fcs[0](output_hidden_states))
