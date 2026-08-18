@@ -258,6 +258,16 @@ def infer_single_image(
     else:
         cls_label = "synthetic"
 
+    # Ghi kết quả vào CSV log
+    csv_path = os.path.join(vis_save_path, "results.csv")
+    write_header = not os.path.exists(csv_path)
+    with open(csv_path, "a", encoding="utf-8") as f:
+        if write_header:
+            f.write("filename,classification,has_mask,text_output\n")
+        has_mask = len(pred_masks) > 0
+        clean_text = text_output.replace('"', '""')
+        f.write(f'"{os.path.basename(image_path)}","{cls_label}",{has_mask},"{clean_text}"\n')
+
     saved_files = []
     if len(pred_masks) > 0:
         for i, pred_mask in enumerate(pred_masks):

@@ -39,8 +39,34 @@ def calculate_dice(pred_mask, gt_mask):
 
 def evaluate_predictions(results_csv, gt_csv, gt_mask_dir, pred_dir):
     """Đánh giá toàn diện Classification và Segmentation cho một thư mục kết quả."""
-    df_pred = pd.read_csv(results_csv)
     df_gt = pd.read_csv(gt_csv)
+    
+    if os.path.exists(results_csv):
+        df_pred = pd.read_csv(results_csv)
+    else:
+        # Tự động khôi phục từ các file ảnh đã lưu trong pred_dir nếu chưa có results.csv
+        print(f"⚠️ Không tìm thấy {results_csv}, đang tự động quét các file mask trong {pred_dir}...")
+        records = []
+        for _, row in df_gt.iterrows():
+            fname = row["filename"]
+            base_name = os.path.splitext(fname)[0]
+            mask_path = os.path.join(pred_dir, f"{base_name}_mask_0.jpg")
+            
+            cls_pred = "synthetic" # default
+            has_mask = False
+            if os.path.exists(mask_path):
+                m = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+                if m is not None and m.max() > 0:
+                    cls_pred = "tampered"
+                    has_mask = True
+                else:
+                    cls_pred = "synthetic"
+            records.append({
+                "filename": fname,
+                "classification": cls_pred,
+                "has_mask": has_mask
+            })
+        df_pred = pd.DataFrame(records)
     
     # Merge kết quả dự đoán với ground truth theo tên file
     df_merged = pd.merge(df_gt, df_pred, on="filename", suffixes=('_gt', '_pred'))
