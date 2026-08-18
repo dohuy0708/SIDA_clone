@@ -13,3 +13,5 @@ scipy
 bitsandbytes>=0.46.1
 torchviz
 tensorboard
+datasets
+pandas
