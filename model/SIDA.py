@@ -442,23 +442,24 @@ class SIDAForCausalLM(LlavaLlamaForCausalLM):
             batch_size = output_ids.shape[0]
             assert batch_size == 1, "Batch size > 1 not handled in this example"
 
-            # Find positions of [CLS] tokens in the sequence
+            # Find positions of [CLS] tokens in the sequence (matching training code lines 208-220)
             cls_token_mask = (output_ids[:, 1:] == self.cls_token_idx)
             cls_token_mask = torch.cat(
                 [
-                    torch.zeros((cls_token_mask.shape[0], 255)).bool().cuda(),
-                    cls_token_mask
+                    torch.zeros((cls_token_mask.shape[0], 255), dtype=torch.bool, device=output_ids.device),
+                    cls_token_mask,
+                    torch.zeros((cls_token_mask.shape[0], 1), dtype=torch.bool, device=output_ids.device)
                 ],
                 dim=1
             )
 
-            # Align mask and hidden_states dimensions (may differ by 1 due to BOS token)
+            # Ensure alignment with hidden_states dimensions
             hs_len = output_hidden_states.shape[1]
-            mask_len = cls_token_mask.shape[1]
-            if mask_len < hs_len:
-                output_hidden_states = output_hidden_states[:, :mask_len, :]
-            elif mask_len > hs_len:
-                cls_token_mask = cls_token_mask[:, :hs_len]
+            if cls_token_mask.shape[1] != hs_len:
+                if cls_token_mask.shape[1] > hs_len:
+                    cls_token_mask = cls_token_mask[:, :hs_len]
+                else:
+                    cls_token_mask = torch.cat([cls_token_mask, torch.zeros((cls_token_mask.shape[0], hs_len - cls_token_mask.shape[1]), dtype=torch.bool, device=output_ids.device)], dim=1)
 
             pred_masks = []
             predicted_class = None
@@ -470,21 +471,22 @@ class SIDAForCausalLM(LlavaLlamaForCausalLM):
                     last_cls_result = cls_result[-1]
                     predicted_class = torch.argmax(last_cls_result, dim=-1).item()
                     if predicted_class == 2:
-                        # Proceed with segmentation if class is tampered
+                        # Proceed with segmentation if class is tampered (matching training code lines 221-226)
                         seg_token_mask = (output_ids[:, 1:] == self.seg_token_idx)
                         seg_token_mask = torch.cat(
                             [
-                                torch.zeros((seg_token_mask.shape[0], 255)).bool().cuda(),
-                                seg_token_mask
+                                torch.zeros((seg_token_mask.shape[0], 255), dtype=torch.bool, device=output_ids.device),
+                                seg_token_mask,
+                                torch.zeros((seg_token_mask.shape[0], 1), dtype=torch.bool, device=output_ids.device)
                             ],
                             dim=1
                         )
                         # Align seg_token_mask with hidden_states dimensions
-                        seg_mask_len = seg_token_mask.shape[1]
-                        if seg_mask_len < hs_len:
-                            seg_token_mask = seg_token_mask[:, :hs_len]
-                        elif seg_mask_len > hs_len:
-                            seg_token_mask = seg_token_mask[:, :hs_len]
+                        if seg_token_mask.shape[1] != hs_len:
+                            if seg_token_mask.shape[1] > hs_len:
+                                seg_token_mask = seg_token_mask[:, :hs_len]
+                            else:
+                                seg_token_mask = torch.cat([seg_token_mask, torch.zeros((seg_token_mask.shape[0], hs_len - seg_token_mask.shape[1]), dtype=torch.bool, device=output_ids.device)], dim=1)
                         # Process hidden states for segmentation
                         hidden_states = []
                         hidden_states.append(self.model.text_hidden_fcs[0](output_hidden_states))
