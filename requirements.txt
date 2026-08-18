@@ -15,3 +15,5 @@ torchviz
 tensorboard
 datasets
 pandas
+scikit-learn
+matplotlib
